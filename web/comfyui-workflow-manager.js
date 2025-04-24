@@ -498,7 +498,7 @@ class WorkflowManager {
   // 保存工作流
   async saveWorkflow(name, description, workflow, id = "") {
     try {
-      // 输出调试信息，查看工作流中的节点和widgets信息
+      // 输出调试信息，查看工作流中的节点和widgets_params信息
       console.log(`[Workflow Manager] 准备保存工作流 "${name}"`);
       const nodeWidgetsInfo = {};
       if (workflow && workflow.nodes && Array.isArray(workflow.nodes)) {
@@ -506,15 +506,15 @@ class WorkflowManager {
           if (node.type && node.id) {
             nodeWidgetsInfo[node.id] = {
               type: node.type,
-              has_widgets: !!node.widgets && Array.isArray(node.widgets),
-              widgets_count: node.widgets ? node.widgets.length : 0,
+              has_widgets_params: !!node.widgets_params && Array.isArray(node.widgets_params),
+              widgets_params_count: node.widgets_params ? node.widgets_params.length : 0,
               has_values: !!node.widgets_values && Array.isArray(node.widgets_values),
               values_count: node.widgets_values ? node.widgets_values.length : 0
             };
           }
         });
       }
-      console.log(`[Workflow Manager] 工作流包含 ${Object.keys(nodeWidgetsInfo).length} 个节点的widgets信息:`, nodeWidgetsInfo);
+      console.log(`[Workflow Manager] 工作流包含 ${Object.keys(nodeWidgetsInfo).length} 个节点的widgets_params信息:`, nodeWidgetsInfo);
       
       const response = await fetch("/api/workflow/save", {
         method: "POST",
@@ -636,9 +636,9 @@ class WorkflowManager {
                   // 尝试找到该输入的默认值
                   let paramValue = "";
                   
-                  // 如果有widgets，尝试从中获取对应参数的值
-                  if (node.widgets) {
-                    const matchingWidget = node.widgets.find(w => w.name === input.name);
+                  // 如果有widgets_params，尝试从中获取对应参数的值
+                  if (node.widgets_params) {
+                    const matchingWidget = node.widgets_params.find(w => w.name === input.name);
                     if (matchingWidget) {
                       paramValue = matchingWidget.value || "";
                       console.log(`[Workflow Manager] 从widget获取参数值: ${paramValue}`);
@@ -659,11 +659,11 @@ class WorkflowManager {
             } else {
               console.log(`[Workflow Manager] 节点没有输入参数定义`);
               
-              // 如果没有明确的inputs定义但有widgets，使用widgets作为参数
-              if (node.widgets && node.widgets.length > 0) {
-                console.log(`[Workflow Manager] 使用widgets作为参数，数量: ${node.widgets.length}`);
+              // 如果没有明确的inputs定义但有widgets_params，使用widgets_params作为参数
+              if (node.widgets_params && node.widgets_params.length > 0) {
+                console.log(`[Workflow Manager] 使用widgets_params作为参数，数量: ${node.widgets_params.length}`);
                 
-                node.widgets.forEach(widget => {
+                node.widgets_params.forEach(widget => {
                   if (widget.name) {
                     params[widget.name] = widget.value;
                     console.log(`[Workflow Manager] 添加widget参数: ${widget.name} = ${widget.value}`);
@@ -739,18 +739,17 @@ class WorkflowManager {
         return;
       }
       
-      if (!paramsText) {
-        this.showAlert("请输入参数");
-        return;
-      }
+      // 参数可以为空，移除强制要求
       
-      // 尝试解析JSON
-      let params;
-      try {
-        params = JSON.parse(paramsText);
-      } catch (error) {
-        this.showAlert(`JSON解析失败: ${error.message}`, "参数错误");
-        return;
+      // 尝试解析JSON，如果为空则使用空对象
+      let params = {};
+      if (paramsText) {
+        try {
+          params = JSON.parse(paramsText);
+        } catch (error) {
+          this.showAlert(`JSON解析失败: ${error.message}`, "参数错误");
+          return;
+        }
       }
       
       try {
@@ -770,6 +769,9 @@ class WorkflowManager {
   async executeWorkflow(workflowId, params) {
     try {
       console.log("[Workflow Manager] 执行工作流:", workflowId, "参数:", params);
+      
+      // 确保params是一个对象
+      params = params || {};
       
       // 发送API请求执行工作流，由后端执行转换逻辑
       const response = await fetch(`/api/workflow/execute/${workflowId}`, {
@@ -1094,13 +1096,13 @@ class WorkflowManager {
           continue;
         }
         
-        // 如果节点有widgets_values但没有widgets定义
-        if (node.widgets_values && (!node.widgets || !node.widgets.length)) {
-          console.log(`[Workflow Manager] 节点 ${node.id} (${node.type}) 没有widgets定义，尝试从实例获取`);
+        // 如果节点有widgets_values但没有widgets_params定义
+        if (node.widgets_values && (!node.widgets_params || !node.widgets_params.length)) {
+          console.log(`[Workflow Manager] 节点 ${node.id} (${node.type}) 没有widgets_params定义，尝试从实例获取`);
           
-          // 创建widgets数组（如果不存在）
-          if (!node.widgets) {
-            node.widgets = [];
+          // 创建widgets_params数组（如果不存在）
+          if (!node.widgets_params) {
+            node.widgets_params = [];
           }
           
           // 从实例中获取widgets信息
@@ -1117,8 +1119,8 @@ class WorkflowManager {
                 type: widget.type || 'string'      // 使用widget类型或默认为字符串
               };
               
-              // 添加到节点的widgets数组
-              node.widgets.push(widgetInfo);
+              // 添加到节点的widgets_params数组
+              node.widgets_params.push(widgetInfo);
               console.log(`[Workflow Manager] 为节点 ${node.id} 添加widget定义: ${widgetInfo.name}`);
             }
           }
@@ -1237,38 +1239,6 @@ app.registerExtension({
         queryButton.style.backgroundColor = "#43cea2";
       });
       
-      // // 创建"执行工作流"SVG图标按钮
-      // const executeButton = document.createElement("button");
-      // executeButton.id = "workflow-execute-button";
-      // executeButton.className = "comfyui-button"; // 使用ComfyUI的标准按钮类
-      // executeButton.title = "执行带参数的工作流"; // 添加tooltip
-      // executeButton.setAttribute("aria-label", "执行带参数的工作流");
-      // executeButton.innerHTML = `
-      //   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      //     <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>
-      //     <path d="M8 12h8"></path>
-      //     <path d="M12 8v8"></path>
-      //     <polygon points="10 16 10 8 16 12 10 16"></polygon>
-      //   </svg>
-      // `;
-      // executeButton.style.display = "flex";
-      // executeButton.style.alignItems = "center";
-      // executeButton.style.justifyContent = "center";
-      // executeButton.style.padding = "6px";
-      // executeButton.style.color = "white"; 
-      // executeButton.style.border = "none";
-      // executeButton.style.borderRadius = "4px";
-      // executeButton.style.backgroundColor = "#6c5ce7";
-      // executeButton.style.margin = "0 5px";
-      
-      // // 鼠标悬停效果
-      // executeButton.addEventListener("mouseover", () => {
-      //   executeButton.style.backgroundColor = "#5546d3";
-      // });
-      // executeButton.addEventListener("mouseout", () => {
-      //   executeButton.style.backgroundColor = "#6c5ce7";
-      // });
-      
       // 点击事件
       saveButton.onclick = () => {
         if (!workflowManagerInstance) {
@@ -1284,24 +1254,15 @@ app.registerExtension({
         workflowManagerInstance.showWorkflowListDialog();
       };
       
-      // executeButton.onclick = () => {
-      //   if (!workflowManagerInstance) {
-      //     workflowManagerInstance = new WorkflowManager();
-      //   }
-      //   workflowManagerInstance.showExecuteWorkflowDialog();
-      // };
-      
       // 将按钮添加到包含Manager按钮的按钮组中，并放在Manager按钮前面
       const managerButton = managerGroup.querySelector('button[title="ComfyUI Manager"]');
       if (managerButton) {
         managerGroup.insertBefore(saveButton, managerButton);
         managerGroup.insertBefore(queryButton, managerButton);
-        // managerGroup.insertBefore(executeButton, managerButton);
       } else {
         // 如果找不到Manager按钮，就直接添加到按钮组中
         managerGroup.appendChild(saveButton);
         managerGroup.appendChild(queryButton);
-        // managerGroup.appendChild(executeButton);
       }
       
       console.log("已添加工作流管理器按钮到ComfyUI Manager按钮前面");

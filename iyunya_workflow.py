@@ -218,12 +218,10 @@ async def execute_workflow_with_params(request):
         # 获取请求参数
         data = await request.json()
         params = data.get("params", {})
+        client_id = data.get("client_id", f"workflow_manager_{workflow_id}_{str(uuid.uuid4())[:8]}")
         
         if not params:
-            return web.json_response({
-                "status": "error", 
-                "message": "未提供参数"
-            })
+            print(f"[Workflow Manager] 未提供参数，将使用工作流原始参数执行")
         
         # 创建工作流副本，以便修改
         modified_workflow = copy.deepcopy(workflow_json)
@@ -276,8 +274,8 @@ async def execute_workflow_with_params(request):
                 
                 # 处理widget值
                 if "widgets_values" in node and isinstance(node["widgets_values"], list):
-                    if "widgets" in node and isinstance(node["widgets"], list):
-                        for i, widget in enumerate(node["widgets"]):
+                    if "widgets_params" in node and isinstance(node["widgets_params"], list):
+                        for i, widget in enumerate(node["widgets_params"]):
                             if "name" in widget and i < len(node["widgets_values"]):
                                 widget_name = widget["name"]
                                 # 如果没有连接输入，才使用widget值
@@ -396,11 +394,7 @@ async def execute_workflow_with_params(request):
                                 print(f"[Workflow Manager] 将输出参数 {output_name}: {output_data} 直接写入到inputs中")
         
         if input_nodes_replaced == 0:
-            print(f"[Workflow Manager] 未找到匹配的输入节点参数")
-            return web.json_response({
-                "status": "warning", 
-                "message": "未找到匹配的输入节点参数，工作流将以原始参数执行"
-            })
+            print(f"[Workflow Manager] 未找到匹配的输入节点参数，工作流将以原始参数执行")
         
         # 使用API格式的工作流
         final_workflow = nodes
@@ -425,20 +419,21 @@ async def execute_workflow_with_params(request):
             
             # 准备执行数据
             extra_data = {
-                "client_id": f"workflow_manager_{workflow_id}_{str(uuid.uuid4())[:8]}",
+                "client_id": client_id,
                 "workflow_id": workflow_id,
                 "workflow_name": workflow_meta.get("name", "Unknown")
             }
             
             # 提交到队列
             PromptServer.instance.prompt_queue.put((0, prompt_id, final_workflow, extra_data, valid[2]))
-            print(f"[Workflow Manager] 工作流已提交到执行队列，ID: {prompt_id}, prompt: {json.dumps(final_workflow, ensure_ascii=False)}")
+            print(f"[Workflow Manager] 工作流已提交到执行队列，ID: {prompt_id}, client_id: {client_id}")
             
             return web.json_response({
                 "status": "success", 
                 "message": "工作流已提交执行",
                 "prompt_id": prompt_id,
                 "workflow_id": workflow_id,
+                "client_id": client_id,
                 "replaced_params_count": input_nodes_replaced
             })
             
