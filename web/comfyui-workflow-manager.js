@@ -804,14 +804,59 @@ class WorkflowManager {
   
   // 复制文本到剪贴板
   copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(
-      () => {
-        console.log("[Workflow Manager] 复制到剪贴板成功");
-      },
-      (err) => {
-        console.error("[Workflow Manager] 复制到剪贴板失败:", err);
+    // 检查navigator.clipboard是否可用
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => {
+          console.log("[Workflow Manager] 复制到剪贴板成功");
+        },
+        (err) => {
+          console.error("[Workflow Manager] 复制到剪贴板失败:", err);
+          this.fallbackCopyToClipboard(text);
+        }
+      );
+    } else {
+      // 对于不支持clipboard API的浏览器使用备用方法
+      this.fallbackCopyToClipboard(text);
+    }
+  }
+  
+  // 复制到剪贴板的备用方法
+  fallbackCopyToClipboard(text) {
+    try {
+      // 创建一个临时textarea元素
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      
+      // 将元素设为不可见
+      textArea.style.position = "fixed";
+      textArea.style.top = "0";
+      textArea.style.left = "0";
+      textArea.style.width = "2em";
+      textArea.style.height = "2em";
+      textArea.style.padding = "0";
+      textArea.style.border = "none";
+      textArea.style.outline = "none";
+      textArea.style.boxShadow = "none";
+      textArea.style.background = "transparent";
+      
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      // 尝试复制文本
+      const successful = document.execCommand("copy");
+      if (successful) {
+        console.log("[Workflow Manager] 使用备用方法复制成功");
+      } else {
+        console.error("[Workflow Manager] 使用备用方法复制失败");
       }
-    );
+      
+      // 移除临时元素
+      document.body.removeChild(textArea);
+    } catch (err) {
+      console.error("[Workflow Manager] 复制到剪贴板失败:", err);
+    }
   }
   
   // 添加对话框样式
