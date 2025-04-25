@@ -160,10 +160,9 @@ class WorkflowManager {
   // 显示工作流保存对话框
   async showSaveWorkflowDialog() {
     // 获取当前工作流
-    const workflow = app.graph.serialize();
-    
-    // 增强工作流信息，添加widgets name信息
-    this.enhanceWorkflowWithWidgetsInfo(workflow);
+    const graphToPrompt = await app.graphToPrompt();
+    const workflow = graphToPrompt['workflow'];
+    const api = graphToPrompt['output'];
     
     // 创建对话框DOM元素
     const dialog = document.createElement("div");
@@ -230,7 +229,7 @@ class WorkflowManager {
       }
       
       try {
-        await this.saveWorkflow(name, description, workflow, workflowId);
+        await this.saveWorkflow(name, description, workflow, workflowId, api);
         document.body.removeChild(dialog);
         this.showAlert("工作流保存成功");
       } catch (error) {
@@ -240,6 +239,57 @@ class WorkflowManager {
     
     // 添加对话框外部点击和ESC关闭
     this.setupDialogCloseEvents(dialog);
+  }
+  
+  // 保存工作流
+  async saveWorkflow(name, description, workflow, id = "", api = null) {
+    try {
+      // 输出调试信息，查看工作流中的节点和widgets_params信息
+      console.log(`[Workflow Manager] 准备保存工作流 "${name}"`);
+      const nodeWidgetsInfo = {};
+      if (workflow && workflow.nodes && Array.isArray(workflow.nodes)) {
+        workflow.nodes.forEach(node => {
+          if (node.type && node.id) {
+            nodeWidgetsInfo[node.id] = {
+              type: node.type,
+              has_widgets_params: !!node.widgets_params && Array.isArray(node.widgets_params),
+              widgets_params_count: node.widgets_params ? node.widgets_params.length : 0,
+              has_values: !!node.widgets_values && Array.isArray(node.widgets_values),
+              values_count: node.widgets_values ? node.widgets_values.length : 0
+            };
+          }
+        });
+      }
+      console.log(`[Workflow Manager] 工作流包含 ${Object.keys(nodeWidgetsInfo).length} 个节点的widgets_params信息:`, nodeWidgetsInfo);
+      
+      // 构建请求数据
+      const requestData = {
+        name,
+        description,
+        workflow: JSON.stringify(workflow),
+        api: JSON.stringify(api),
+        id: id || undefined // 如果ID为空字符串则不发送该字段
+      };
+      
+      const response = await fetch("/api/workflow/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(requestData)
+      });
+      
+      const result = await response.json();
+      
+      if (result.status !== "success") {
+        throw new Error(result.message || "保存工作流失败");
+      }
+      
+      return result;
+    } catch (error) {
+      console.error("[Workflow Manager] 保存工作流失败:", error);
+      throw error;
+    }
   }
   
   // 显示工作流列表对话框
@@ -456,8 +506,10 @@ class WorkflowManager {
           
           try {
             // 获取工作流数据以解析参数
-            const workflowData = await this.getWorkflowData(workflowId);
-            const paramTemplate = this.extractWorkflowParams(workflowData);
+            const workflowApi = await this.getWorkflowApi(workflowId);
+            
+            // 使用API数据生成参数模板
+            const paramTemplate = this.extractParamsFromApi(workflowApi);
             
             // 关闭当前对话框
             document.body.removeChild(dialog);
@@ -495,53 +547,6 @@ class WorkflowManager {
     }
   }
   
-  // 保存工作流
-  async saveWorkflow(name, description, workflow, id = "") {
-    try {
-      // 输出调试信息，查看工作流中的节点和widgets_params信息
-      console.log(`[Workflow Manager] 准备保存工作流 "${name}"`);
-      const nodeWidgetsInfo = {};
-      if (workflow && workflow.nodes && Array.isArray(workflow.nodes)) {
-        workflow.nodes.forEach(node => {
-          if (node.type && node.id) {
-            nodeWidgetsInfo[node.id] = {
-              type: node.type,
-              has_widgets_params: !!node.widgets_params && Array.isArray(node.widgets_params),
-              widgets_params_count: node.widgets_params ? node.widgets_params.length : 0,
-              has_values: !!node.widgets_values && Array.isArray(node.widgets_values),
-              values_count: node.widgets_values ? node.widgets_values.length : 0
-            };
-          }
-        });
-      }
-      console.log(`[Workflow Manager] 工作流包含 ${Object.keys(nodeWidgetsInfo).length} 个节点的widgets_params信息:`, nodeWidgetsInfo);
-      
-      const response = await fetch("/api/workflow/save", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name,
-          description,
-          workflow: JSON.stringify(workflow),
-          id: id || undefined // 如果ID为空字符串则不发送该字段
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.status !== "success") {
-        throw new Error(result.message || "保存工作流失败");
-      }
-      
-      return result;
-    } catch (error) {
-      console.error("[Workflow Manager] 保存工作流失败:", error);
-      throw error;
-    }
-  }
-  
   // 加载工作流
   async loadWorkflow(workflowId) {
     try {
@@ -557,6 +562,25 @@ class WorkflowManager {
       // 清除当前工作流并加载新的
       app.graph.clear();
       app.loadGraphData(workflow);
+      
+      // 如果返回了API数据，尝试加载到ComfyUI的API队列中
+      if (result.api) {
+        try {
+          const api = JSON.parse(result.api);
+          console.log(`[Workflow Manager] 工作流包含API数据，尝试加载`);
+          
+          // 如果ComfyUI有相关函数可以直接加载API，可以在这里调用
+          // 例如：app.loadApiData(api) 或类似的方法（根据ComfyUI实际提供的接口而定）
+          
+          // 将API数据存储在app对象中，以便其他组件可以访问
+          if (app && typeof app === 'object') {
+            app.lastLoadedApi = api;
+            console.log(`[Workflow Manager] API数据已加载到app.lastLoadedApi中`);
+          }
+        } catch (apiError) {
+          console.error(`[Workflow Manager] 加载API数据失败:`, apiError);
+        }
+      }
       
       return result;
     } catch (error) {
@@ -586,7 +610,7 @@ class WorkflowManager {
   }
   
   // 获取工作流数据
-  async getWorkflowData(workflowId) {
+  async getWorkflowApi(workflowId) {
     try {
       const response = await fetch(`/api/workflow/get/${workflowId}`);
       const result = await response.json();
@@ -595,92 +619,54 @@ class WorkflowManager {
         throw new Error(result.message || "获取工作流数据失败");
       }
       
-      const workflow = JSON.parse(result.workflow);
+      const api = JSON.parse(result.api);
       
-      // 缓存工作流数据用于连接查找
-      this.cacheWorkflowForExecution(workflow);
-      
-      return workflow;
+      return api;
     } catch (error) {
       console.error("[Workflow Manager] 获取工作流数据失败:", error);
       throw error;
     }
   }
   
-  // 从工作流中提取输入参数模板
-  extractWorkflowParams(workflow) {
+  // 从API数据中提取参数
+  extractParamsFromApi(api) {
     try {
       const params = {};
       
-      // 检查工作流节点
-      if (workflow && workflow.nodes) {
-        console.log("[Workflow Manager] 开始遍历工作流节点，节点数量:", Object.keys(workflow.nodes).length);
+      if (!api || typeof api !== 'object') {
+        console.log("[Workflow Manager] API数据为空或格式不正确");
+        return params;
+      }
+      
+      console.log("[Workflow Manager] 开始从API数据提取参数");
+      
+      // 遍历所有节点
+      for (const nodeId in api) {
+        const node = api[nodeId];
         
-        // 遍历所有节点
-        for (const nodeId in workflow.nodes) {
-          const node = workflow.nodes[nodeId];
+        // 检查节点类型是否是iyunya_in_开头
+        if (node.class_type && node.class_type.startsWith("iyunya_in_")) {
+          console.log(`[Workflow Manager] 从API中找到输入节点: ${node.class_type} (ID: ${nodeId})`);
           
-          // 只检测type为iyunya_in_开头的节点
-          if (node.type && node.type.startsWith("iyunya_in_")) {
-            console.log(`[Workflow Manager] 发现输入节点: ${node.type}`);
-            
-            // 如果节点有inputs，提取所有输入参数
-            if (node.inputs) {
-              console.log(`[Workflow Manager] 节点inputs数量: ${node.inputs.length}`);
+          // 获取节点的输入参数
+          if (node.inputs && typeof node.inputs === 'object') {
+            for (const inputName in node.inputs) {
+              const inputValue = node.inputs[inputName];
               
-              // 遍历节点的所有输入
-              node.inputs.forEach((input, index) => {
-                if (input.name) {
-                  console.log(`[Workflow Manager] 输入参数 ${index}: 名称=${input.name}, 类型=${input.type}`);
-                  
-                  // 尝试找到该输入的默认值
-                  let paramValue = "";
-                  
-                  // 如果有widgets_params，尝试从中获取对应参数的值
-                  if (node.widgets_params) {
-                    const matchingWidget = node.widgets_params.find(w => w.name === input.name);
-                    if (matchingWidget) {
-                      paramValue = matchingWidget.value || "";
-                      console.log(`[Workflow Manager] 从widget获取参数值: ${paramValue}`);
-                    }
-                  }
-                  
-                  // 如果没找到widget，尝试从属性中查找
-                  if (paramValue === "" && node.properties && node.properties[input.name] !== undefined) {
-                    paramValue = node.properties[input.name];
-                    console.log(`[Workflow Manager] 从properties获取参数值: ${paramValue}`);
-                  }
-                  
-                  // 添加到参数列表
-                  params[input.name] = paramValue;
-                  console.log(`[Workflow Manager] 添加参数: ${input.name} = ${paramValue}`);
-                }
-              });
-            } else {
-              console.log(`[Workflow Manager] 节点没有输入参数定义`);
-              
-              // 如果没有明确的inputs定义但有widgets_params，使用widgets_params作为参数
-              if (node.widgets_params && node.widgets_params.length > 0) {
-                console.log(`[Workflow Manager] 使用widgets_params作为参数，数量: ${node.widgets_params.length}`);
-                
-                node.widgets_params.forEach(widget => {
-                  if (widget.name) {
-                    params[widget.name] = widget.value;
-                    console.log(`[Workflow Manager] 添加widget参数: ${widget.name} = ${widget.value}`);
-                  }
-                });
+              // 跳过数组类型的值，因为它们通常是连接而不是实际参数
+              if (!Array.isArray(inputValue)) {
+                params[inputName] = inputValue;
+                console.log(`[Workflow Manager] 从API添加参数: ${inputName} = ${inputValue}`);
               }
             }
           }
         }
-      } else {
-        console.log("[Workflow Manager] 工作流没有节点或节点结构无效");
       }
       
-      console.log("[Workflow Manager] 提取的参数模板:", params);
+      console.log("[Workflow Manager] 从API提取的参数模板:", params);
       return params;
     } catch (error) {
-      console.error("[Workflow Manager] 提取工作流参数失败:", error);
+      console.error("[Workflow Manager] 从API提取参数失败:", error);
       return {};
     }
   }
