@@ -240,7 +240,7 @@ async def execute_workflow_with_params(request):
                 # 替换参数
                 for param_name, param_value in params.items():
                     # 直接替换input中的参数，不考虑类型转换
-                    if param_value is not None:  # 跳过None值
+                    if param_value is not None and param_name in node["inputs"]:  # 只替换已存在的参数
                         node["inputs"][param_name] = param_value
                         print(f"[Workflow Manager] 替换API参数 {param_name}: {param_value}")
                         input_nodes_replaced += 1
