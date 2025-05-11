@@ -25,6 +25,7 @@ ComfyUI工作流管理器是一个功能强大的扩展，帮助您高效地保�
   - 提供完整的REST API用于编程访问
   - 支持通过API保存、获取、执行工作流
   - 每次执行生成唯一的客户端ID，确保多线程安全执行
+  - 调用API接口入参/出参处理，请配合 https://github.com/iyunya/ComfyUI-iyunya-node 动态出入参组件
 
 ## 安装方法
 
